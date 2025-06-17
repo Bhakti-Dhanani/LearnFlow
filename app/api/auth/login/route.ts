@@ -1,55 +1,102 @@
-import { NextResponse } from "next/server";
-import { setUser, store } from "../../../../lib/auth";
-import prisma from "../../../../lib/prisma";
+// /pages/api/login.ts
+import type { NextApiRequest, NextApiResponse } from "next";
+import { loginSchema } from "@/lib/validations/auth";
+import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { NextResponse } from "next/server";
+
+const prisma = new PrismaClient();
+
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      JWT_SECRET: string; // Declare JWT_SECRET as a required string
+    }
+  }
+}
 
 export async function POST(request: Request) {
-  try {
-    const { email, password } = await request.json();
+    try{
+        const body = await request.json();
+        console.log("Incoming request body:", body);
 
-    if (!email || !password) {
-      return NextResponse.json({ error: "Missing email or password" }, { status: 400 });
+        const result = loginSchema.safeParse(body);
+
+ 
+        if (!result.success) {
+            return NextResponse.json({ 
+                success: false, 
+                errors: result.error.flatten().fieldErrors 
+            });
+        }
+
+        const { email, password } = result.data;
+
+        const user = await prisma.user.findUnique({
+            where: { email },
+            select: {
+                userId: true, // Select id (mapped to userId)
+                email: true,
+                username: true,
+                password: true,
+                role: true,
+            },
+        });
+
+        if (!user) {
+            return NextResponse.json({ 
+                success: false,
+                message: "Invalid credentials" 
+            });
+        }
+
+        if (!user.password) {
+          return NextResponse.json({
+            success: false,
+            message: "Invalid credentials",
+          });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+
+        if (!isPasswordValid) {
+            return NextResponse.json({ 
+                success: false,
+                message: "Invalid credentials" 
+            });
+        }
+
+        if (!process.env.JWT_SECRET) {
+            throw new Error("JWT_SECRET is not defined in the environment variables.");
+        }
+
+        const token = jwt.sign({  
+            userId: user.userId, // Changed from user.userId to user.id
+            email: user.email,
+            role: user.role
+        },
+            process.env.JWT_SECRET as string, // TypeScript assertion added
+        {
+            expiresIn: "1h",
+        });
+
+        return NextResponse.json({
+            success: true,
+            message: "Login successful",
+            token,
+            user: { 
+                userId: user.userId, // Map id to userId in the response
+                email: user.email, 
+                username: user.username,
+                role: user.role
+            },
+        });
+    } catch (error) {
+        console.error("Login Error:", error);
+        return NextResponse.json({ 
+            success: false,
+            message: "Failed to Login" 
+        });
     }
-
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-
-    if (!isPasswordValid) {
-      return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
-    }
-
-    // Store user data in Redux Toolkit
-    store.dispatch(setUser({
-      id: Number(user.id), // Ensure id is treated as a number
-      role: user.role,
-      name: user.name,
-      email: user.email,
-    }));
-
-    const token = jwt.sign(
-      { id: Number(user.id), email: user.email, role: user.role, name: user.name }, // Added name to the token payload
-      process.env.NEXTAUTH_SECRET || "default_secret_key",
-      { expiresIn: "10h" }
-    );
-
-    return NextResponse.json({
-      message: "Login successful",
-      user: {
-        id: user.id,
-        role: user.role,
-        name: user.name,
-        email: user.email,
-      },
-      token,
-    }, { status: 200 });
-  } catch (error) {
-    console.error("Login error:", error);
-    return NextResponse.json({ error: "Failed to login" }, { status: 500 });
-  }
 }

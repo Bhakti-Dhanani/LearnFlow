@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "../../../lib/prisma";
-import jwt from "jsonwebtoken";
+import { PrismaClient } from "@prisma/client";
+import { authMiddleware } from "@/lib/middleware/authMiddleware";
 
-const secret = process.env.NEXTAUTH_SECRET || "default_secret";
-
-interface TokenPayload {
-  id: number; // Changed id type to number
-  role: string;
-}
+const prismaClient = new PrismaClient();
 
 /**  GET /api/courses  */
 export async function GET(req: NextRequest) {
@@ -16,13 +11,15 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "10", 10);
 
-    const totalCourses = await prisma.course.count();
-    const courses = await prisma.course.findMany({
+    const totalCourses = await prismaClient.course.count();
+    const courses = await prismaClient.course.findMany({
       skip: (page - 1) * limit,
       take: limit,
     });
 
     return NextResponse.json({
+      success: true,
+      status: 200,
       totalCourses,
       page,
       limit,
@@ -30,93 +27,69 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("Error fetching courses:", error);
-    return NextResponse.json({ error: "Failed to fetch courses." }, { status: 500 });
+    return NextResponse.json({ success: false, status: 500, message: "Failed to fetch courses." }, { status: 500 });
   }
 }
 
 /**  POST /api/courses  */
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.error("Authorization header is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-    }
+    const user = await authMiddleware(req, ["INSTRUCTOR", "ADMIN"]);
 
-    const tokenString = authHeader.split(" ")[1];
-    const token = jwt.verify(tokenString, secret) as TokenPayload;
+    if ("status" in user) return user;
 
-    if (!token || !token.role || !token.id) {
-      console.error("Token is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-    }
+    const body = await req.json();
+    console.log("Incoming request body:", body);
 
-    if (token.role !== "Instructor" && token.role !== "Admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const { title, description, thumbnail } = await req.json();
+    const { title, description, thumbnail, price, published } = body;
 
     if (!title || !description || !thumbnail) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return NextResponse.json({ success: false, status: 400, message: "Missing required fields" }, { status: 400 });
     }
 
-    const course = await prisma.course.create({
+    const course = await prismaClient.course.create({
       data: {
         title,
         description,
         thumbnail,
-        instructorId: token.id, // Pass instructorId as an integer
+        price,
+        published,
+        creator: {
+          connect: { userId: user.user?.userId }, // Updated to use user.user?.userId
+        },
+        instructor: {
+          connect: { userId: user.user?.userId }, // Updated to use user.user?.userId
+        },
       },
     });
 
-    return NextResponse.json(
-      {
-        message: "Course created successfully",
-        course,
-      },
-      { status: 200 }
-    );
-  } catch (error: any) {
+    return NextResponse.json({ success: true, status: 200, message: "Course created successfully", course });
+  } catch (error) {
     console.error("Error creating course:", error);
-    return NextResponse.json({ error: error.message || "Unexpected error." }, { status: 500 });
+    return NextResponse.json({ success: false, status: 500, message: "Failed to create course." }, { status: 500 });
   }
 }
 
 /**  DELETE /api/courses/:id  */
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.error("Authorization header is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-    }
+    const user = await authMiddleware(req, ["Instructor", "Admin"]);
 
-    const tokenString = authHeader.split(" ")[1];
-    const token = jwt.verify(tokenString, secret) as TokenPayload;
+    if ("status" in user) return user;
 
-    if (!token || !token.id) {
-      console.error("Token is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-    }
+    const courseId = params.id;
 
-    const courseId = parseInt(params.id, 10);
-
-    if (isNaN(courseId)) {
-      return NextResponse.json({ error: "Invalid course ID" }, { status: 400 });
-    }
-
-    const course = await prisma.course.findUnique({ where: { id: courseId } });
+    const course = await prismaClient.course.findUnique({ where: { id: courseId } });
 
     if (!course) {
-      return NextResponse.json({ error: "Course not found" }, { status: 404 });
+      return NextResponse.json({ success: false, status: 404, message: "Course not found" }, { status: 404 });
     }
 
-    await prisma.course.delete({ where: { id: courseId } });
+    await prismaClient.course.delete({ where: { id: courseId } });
 
-    return NextResponse.json({ message: "Course deleted successfully." });
-  } catch (error: any) {
+    return NextResponse.json({ success: true, status: 200, message: "Course deleted successfully." });
+  } catch (error) {
     console.error("Error deleting course:", error);
-    return NextResponse.json({ error: error.message || "Unexpected error." }, { status: 500 });
+    return NextResponse.json({ success: false, status: 500, message: "Failed to delete course." }, { status: 500 });
   }
 }

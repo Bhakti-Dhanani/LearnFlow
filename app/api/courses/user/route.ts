@@ -1,41 +1,34 @@
+"use server";
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "../../../../lib/prisma";
-import jwt from "jsonwebtoken";
+import { PrismaClient } from "@prisma/client";
+import { authMiddleware } from "@/lib/middleware/authMiddleware";
 
-const secret = process.env.NEXTAUTH_SECRET || "default_secret";
+const prismaClient = new PrismaClient();
 
-interface TokenPayload {
-  id: number;
-  role: string;
-}
-
+/**  GET /api/courses/user  */
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    const authResult = await authMiddleware(req, ["INSTRUCTOR", "ADMIN"]);
+
+    if (!authResult.success || !authResult.user) {
+      return NextResponse.json({ error: authResult.message }, { status: 401 });
     }
 
-    const tokenString = authHeader.split(" ")[1];
-    const token = jwt.verify(tokenString, secret) as TokenPayload;
+    const { userId } = authResult.user;
 
-    if (!token || !token.id || !token.role) {
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({ where: { id: token.id } });
-
-    const courses = await prisma.course.findMany({ where: { instructorId: token.id } });
+    const courses = await prismaClient.course.findMany({
+      where: { instructorId: userId },
+    });
 
     if (courses.length === 0) {
       return NextResponse.json({ error: "No courses found for this user." }, { status: 404 });
     }
 
     return NextResponse.json({
+      success: true,
       user: {
-        id: user?.id || token.id,
-        name: user?.name || "Unknown",
-        role: token.role,
+        userId,
+        role: authResult.user.role,
       },
       courses,
     });

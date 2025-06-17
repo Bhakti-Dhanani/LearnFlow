@@ -1,7 +1,7 @@
 import { verify } from 'jsonwebtoken';
 
 export interface AuthPayload {
-  userId: string;
+  userId: string; // Added id property
   role: string;
 }
 
