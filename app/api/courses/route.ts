@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
-import { authMiddleware } from "@/lib/middleware/authMiddleware";
 
+const secret = process.env.JWT_SECRET || "default_secret";
 const prismaClient = new PrismaClient();
+
+interface TokenPayload {
+  userId: string;
+  role: string;
+}
 
 /**  GET /api/courses  */
 export async function GET(req: NextRequest) {
@@ -19,7 +25,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      status: 200,
       totalCourses,
       page,
       limit,
@@ -27,24 +32,34 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("Error fetching courses:", error);
-    return NextResponse.json({ success: false, status: 500, message: "Failed to fetch courses." }, { status: 500 });
+    return NextResponse.json({ success: false, message: "Failed to fetch courses." }, { status: 500 });
   }
 }
 
 /**  POST /api/courses  */
 export async function POST(req: NextRequest) {
   try {
-    const user = await authMiddleware(req, ["INSTRUCTOR", "ADMIN"]);
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
+    }
 
-    if ("status" in user) return user;
+    const tokenString = authHeader.split(" ")[1];
+    const token = jwt.verify(tokenString, secret) as TokenPayload;
+
+    if (!token || !token.role || !token.userId) {
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
+    }
+
+    if (token.role !== "Instructor" && token.role !== "Admin") {
+      return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
+    }
 
     const body = await req.json();
-    console.log("Incoming request body:", body);
-
-    const { title, description, thumbnail,price,published } = body;
+    const { title, description, thumbnail } = body;
 
     if (!title || !description || !thumbnail) {
-      return NextResponse.json({ success: false, status: 400, message: "Missing required fields" }, { status: 400 });
+      return NextResponse.json({ success: false, message: "Missing required fields" }, { status: 400 });
     }
 
     const course = await prismaClient.course.create({
@@ -52,41 +67,45 @@ export async function POST(req: NextRequest) {
         title,
         description,
         thumbnail,
-        price,
-        published,
-        instructor: {
-          connect: { userId: user.userId },
-        },
+        instructorId: token.userId,
       },
     });
 
-    return NextResponse.json({ success: true, status: 201, message: "Course created successfully", course });
+    return NextResponse.json({ success: true, message: "Course created successfully", course });
   } catch (error) {
     console.error("Error creating course:", error);
-    return NextResponse.json({ success: false, status: 500, message: "Failed to create course." }, { status: 500 });
+    return NextResponse.json({ success: false, message: (error as Error).message || "Unexpected error." }, { status: 500 });
   }
 }
 
 /**  DELETE /api/courses/:id  */
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const user = await authMiddleware(req, ["Instructor", "Admin"]);
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
+    }
 
-    if ("status" in user) return user;
+    const tokenString = authHeader.split(" ")[1];
+    const token = jwt.verify(tokenString, secret) as TokenPayload;
+
+    if (!token || !token.userId) {
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
+    }
 
     const courseId = params.id;
 
     const course = await prismaClient.course.findUnique({ where: { id: courseId } });
 
     if (!course) {
-      return NextResponse.json({ success: false, status: 404, message: "Course not found" }, { status: 404 });
+      return NextResponse.json({ success: false, message: "Course not found" }, { status: 404 });
     }
 
     await prismaClient.course.delete({ where: { id: courseId } });
 
-    return NextResponse.json({ success: true, status: 200, message: "Course deleted successfully." });
+    return NextResponse.json({ success: true, message: "Course deleted successfully." });
   } catch (error) {
     console.error("Error deleting course:", error);
-    return NextResponse.json({ success: false, status: 500, message: "Failed to delete course." }, { status: 500 });
+    return NextResponse.json({ success: false, message: (error as Error).message || "Unexpected error." }, { status: 500 });
   }
 }
