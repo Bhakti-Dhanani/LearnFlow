@@ -1,53 +1,43 @@
 import { NextResponse } from "next/server";
-import { registerSchema } from "@/lib/validations/auth";
-import { PrismaClient } from "@prisma/client";
+import prisma from "../../../../lib/prisma";
 import bcrypt from "bcrypt";
-
-const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    console.log("Incoming request body:", body);
+    const { email, password, name, role } = await request.json();
 
-    const result = registerSchema.safeParse(body);
-
-    if (!result.success) {
-      return NextResponse.json(
-        { success: false, errors: result.error.flatten().fieldErrors }
-      );
+    if (!email || !password || !name || !role) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const { username, email, password, role } = result.data;
+    const normalizedRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
+    if (!["Student", "Instructor"].includes(normalizedRole)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
 
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return NextResponse.json(
-        { success: false, message: "User already exists" }
-      );
+      return NextResponse.json({ error: "Email already exists" }, { status: 400 });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await prisma.user.create({
+    const user = await prisma.user.create({
       data: {
-        username,
         email,
         password: hashedPassword,
-        role,
+        name,
+        role: normalizedRole,
       },
     });
 
-    return NextResponse.json(
-      { success: true, message: "User registered successfully" }
-    );
+    return NextResponse.json({ message: "User registered successfully", user }, { status: 200 });
   } catch (error) {
-    console.error("Registration Error:", error);
-    return NextResponse.json(
-      { success: false, message: "Failed to register" }
-    );
+    if ((error as any)?.code === 'P2002') {
+      return NextResponse.json({ error: "A unique constraint violation occurred." }, { status: 400 });
+    }
+    console.error("Registration error:", error);
+    return NextResponse.json({ error: "Failed to register user" }, { status: 500 });
   }
 }
