@@ -16,6 +16,7 @@ export async function authMiddleware(
     const token = authHeader.split(" ")[1];
     const decoded = verifyToken(token);
 
+
     if (!decoded || !decoded.userId || !decoded.role) {
       return { success: false, message: "Invalid or expired token" };
     }
@@ -23,10 +24,12 @@ export async function authMiddleware(
     if (!allowedRoles.includes(decoded.role)) {
       return { success: false, message: "Forbidden: User role not allowed" };
     }
+ 
 
     return { success: true, message: "Authorized", user: { userId: decoded.userId, role: decoded.role } };
   } catch (error) {
     console.error("Error in authMiddleware:", error);
     return { success: false, message: "Unexpected error during authorization" };
   }
+
 }

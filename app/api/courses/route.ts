@@ -41,7 +41,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     console.log("Incoming request body:", body);
 
+
     const { title, description, thumbnail, price, published } = body;
+
 
     if (!title || !description || !thumbnail) {
       return NextResponse.json({ success: false, status: 400, message: "Missing required fields" }, { status: 400 });
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest) {
         thumbnail,
         price,
         published,
+
         creator: {
           connect: { userId: user.user?.userId }, // Updated to use user.user?.userId
         },
@@ -64,6 +67,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, status: 200, message: "Course created successfully", course });
+
   } catch (error) {
     console.error("Error creating course:", error);
     return NextResponse.json({ success: false, status: 500, message: "Failed to create course." }, { status: 500 });
