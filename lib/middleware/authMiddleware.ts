@@ -20,7 +20,7 @@ if (!token) {
   return NextResponse.json({ success: false, message: 'Unauthorized - Token missing' }, { status: 401 });
 }
   const user = verifyToken(token);
-
+console.log("Decoded User from Token:", user);
   if (!user) {
     return NextResponse.json({ success: false, message: 'Invalid or expired token' }, { status: 403 });
   }
@@ -29,5 +29,5 @@ if (!token) {
     return NextResponse.json({ success: false, message: 'Forbidden - Insufficient role' }, { status: 403 });
   }
 
-  return user; // You can use this inside your handler
+  return { user }; // You can use this inside your handler
 }
