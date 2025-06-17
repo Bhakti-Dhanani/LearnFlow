@@ -1,33 +1,35 @@
 // lib/middleware/authMiddleware.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import type { NextRequest } from 'next/server';
+
 
 export async function authMiddleware(
-  request: Request,
+  req: NextRequest,
   allowedRoles: string[] = []
-) {
-  const authHeader = request.headers.get('authorization')?.trim();
+): Promise<{ success: boolean; message: string; user?: { userId: string; role: string } }> {
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return { success: false, message: "Authorization header is missing or invalid" };
+    }
 
-  console.log("Authorization Header:", authHeader);
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    const token = authHeader.split(" ")[1];
+    const decoded = verifyToken(token);
+
+
+    if (!decoded || !decoded.userId || !decoded.role) {
+      return { success: false, message: "Invalid or expired token" };
+    }
+
+    if (!allowedRoles.includes(decoded.role)) {
+      return { success: false, message: "Forbidden: User role not allowed" };
+    }
+ 
+
+    return { success: true, message: "Authorized", user: { userId: decoded.userId, role: decoded.role } };
+  } catch (error) {
+    console.error("Error in authMiddleware:", error);
+    return { success: false, message: "Unexpected error during authorization" };
   }
 
-  const token = authHeader?.split(' ')?.[1]?.trim();
-  console.log("Extracted Token:", token);
-if (!token) {
-  return NextResponse.json({ success: false, message: 'Unauthorized - Token missing' }, { status: 401 });
-}
-  const user = verifyToken(token);
-console.log("Decoded User from Token:", user);
-  if (!user) {
-    return NextResponse.json({ success: false, message: 'Invalid or expired token' }, { status: 403 });
-  }
-
-  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
-    return NextResponse.json({ success: false, message: 'Forbidden - Insufficient role' }, { status: 403 });
-  }
-
-  return { user }; // You can use this inside your handler
 }

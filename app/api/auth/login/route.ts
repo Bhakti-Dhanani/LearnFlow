@@ -8,6 +8,14 @@ import { NextResponse } from "next/server";
 
 const prisma = new PrismaClient();
 
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      JWT_SECRET: string; // Declare JWT_SECRET as a required string
+    }
+  }
+}
+
 export async function POST(request: Request) {
     try{
         const body = await request.json();
@@ -27,6 +35,13 @@ export async function POST(request: Request) {
 
         const user = await prisma.user.findUnique({
             where: { email },
+            select: {
+                userId: true, // Select id (mapped to userId)
+                email: true,
+                username: true,
+                password: true,
+                role: true,
+            },
         });
 
         if (!user) {
@@ -34,6 +49,13 @@ export async function POST(request: Request) {
                 success: false,
                 message: "Invalid credentials" 
             });
+        }
+
+        if (!user.password) {
+          return NextResponse.json({
+            success: false,
+            message: "Invalid credentials",
+          });
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -45,12 +67,16 @@ export async function POST(request: Request) {
             });
         }
 
+        if (!process.env.JWT_SECRET) {
+            throw new Error("JWT_SECRET is not defined in the environment variables.");
+        }
+
         const token = jwt.sign({  
-            userId: user.userId,
+            userId: user.userId, // Changed from user.userId to user.id
             email: user.email,
             role: user.role
         },
-            process.env.JWT_SECRET as string,
+            process.env.JWT_SECRET as string, // TypeScript assertion added
         {
             expiresIn: "1h",
         });
@@ -60,7 +86,7 @@ export async function POST(request: Request) {
             message: "Login successful",
             token,
             user: { 
-                userId: user.userId, 
+                userId: user.userId, // Map id to userId in the response
                 email: user.email, 
                 username: user.username,
                 role: user.role
