@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "../../../lib/prisma";
 import jwt from "jsonwebtoken";
+import { PrismaClient } from "@prisma/client";
 
-const secret = process.env.NEXTAUTH_SECRET || "default_secret";
+const secret = process.env.JWT_SECRET || "default_secret";
+const prismaClient = new PrismaClient();
 
 interface TokenPayload {
-  id: number; // Changed id type to number
+  userId: string;
   role: string;
 }
 
@@ -16,21 +17,22 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "10", 10);
 
-    const totalCourses = await prisma.course.count();
-    const courses = await prisma.course.findMany({
+    const totalCourses = await prismaClient.course.count();
+    const courses = await prismaClient.course.findMany({
       skip: (page - 1) * limit,
       take: limit,
     });
 
     return NextResponse.json({
+      success: true,
       totalCourses,
       page,
       limit,
       courses,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error fetching courses:", error);
-    return NextResponse.json({ error: "Failed to fetch courses." }, { status: 500 });
+    return NextResponse.json({ success: false, message: "Failed to fetch courses." }, { status: 500 });
   }
 }
 
@@ -39,47 +41,40 @@ export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.error("Authorization header is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
     }
 
     const tokenString = authHeader.split(" ")[1];
     const token = jwt.verify(tokenString, secret) as TokenPayload;
 
-    if (!token || !token.role || !token.id) {
-      console.error("Token is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    if (!token || !token.role || !token.userId) {
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
     }
 
     if (token.role !== "Instructor" && token.role !== "Admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
     }
 
-    const { title, description, thumbnail } = await req.json();
+    const body = await req.json();
+    const { title, description, thumbnail } = body;
 
     if (!title || !description || !thumbnail) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return NextResponse.json({ success: false, message: "Missing required fields" }, { status: 400 });
     }
 
-    const course = await prisma.course.create({
+    const course = await prismaClient.course.create({
       data: {
         title,
         description,
         thumbnail,
-        instructorId: token.id, // Pass instructorId as an integer
+        instructorId: token.userId,
       },
     });
 
-    return NextResponse.json(
-      {
-        message: "Course created successfully",
-        course,
-      },
-      { status: 200 }
-    );
-  } catch (error: any) {
+    return NextResponse.json({ success: true, message: "Course created successfully", course });
+  } catch (error) {
     console.error("Error creating course:", error);
-    return NextResponse.json({ error: error.message || "Unexpected error." }, { status: 500 });
+    return NextResponse.json({ success: false, message: (error as Error).message || "Unexpected error." }, { status: 500 });
   }
 }
 
@@ -88,35 +83,29 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.error("Authorization header is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
     }
 
     const tokenString = authHeader.split(" ")[1];
     const token = jwt.verify(tokenString, secret) as TokenPayload;
 
-    if (!token || !token.id) {
-      console.error("Token is missing or invalid.");
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    if (!token || !token.userId) {
+      return NextResponse.json({ success: false, message: "Unauthenticated" }, { status: 401 });
     }
 
-    const courseId = parseInt(params.id, 10);
+    const courseId = params.id;
 
-    if (isNaN(courseId)) {
-      return NextResponse.json({ error: "Invalid course ID" }, { status: 400 });
-    }
-
-    const course = await prisma.course.findUnique({ where: { id: courseId } });
+    const course = await prismaClient.course.findUnique({ where: { id: courseId } });
 
     if (!course) {
-      return NextResponse.json({ error: "Course not found" }, { status: 404 });
+      return NextResponse.json({ success: false, message: "Course not found" }, { status: 404 });
     }
 
-    await prisma.course.delete({ where: { id: courseId } });
+    await prismaClient.course.delete({ where: { id: courseId } });
 
-    return NextResponse.json({ message: "Course deleted successfully." });
-  } catch (error: any) {
+    return NextResponse.json({ success: true, message: "Course deleted successfully." });
+  } catch (error) {
     console.error("Error deleting course:", error);
-    return NextResponse.json({ error: error.message || "Unexpected error." }, { status: 500 });
+    return NextResponse.json({ success: false, message: (error as Error).message || "Unexpected error." }, { status: 500 });
   }
 }
